@@ -1,0 +1,11 @@
+# ZN-Assistant system.prop
+# Menyamarkan status perangkat agar terlihat seperti user build resmi
+
+ro.debuggable=0
+ro.secure=1
+ro.build.tags=release-keys
+ro.build.type=user
+ro.boot.verified_bootstate=green
+ro.boot.veritymode=enforcing
+ro.boot.vbmeta.device_state=locked
+sys.bootloader.locked=1

@@ -1,0 +1,87 @@
+#!/sbin/sh
+# ZN-Assistant module installer
+# Based on Magisk module installation flow.
+#
+# This file is executed by Magisk/Magisk Alpha when installing the module ZIP.
+# Do not add exit 0 inside customize.sh. This installer handles the flow.
+
+OUTFD=${2:-1}
+ZIPFILE=$3
+TMPDIR=/dev/tmp
+
+ui_print() {
+    echo "$@" >&$OUTFD
+}
+
+abort() {
+    ui_print "$@"
+    exit 1
+}
+
+if [ -z "$ZIPFILE" ]; then
+    abort "! ZIP file path not provided"
+fi
+
+# Ensure /data is mounted if needed
+mount /data 2>/dev/null
+
+# Default BOOTMODE for Magisk App installation.
+# If Magisk/recovery already provides BOOTMODE, keep it.
+BOOTMODE=${BOOTMODE:-true}
+export BOOTMODE
+
+# Locate Magisk util_functions.sh
+UTIL=""
+for CANDIDATE in \
+    /data/adb/magisk/util_functions.sh \
+    /sbin/.magisk/mirror/data/adb/magisk/util_functions.sh
+do
+    if [ -f "$CANDIDATE" ]; then
+        UTIL="$CANDIDATE"
+        break
+    fi
+done
+
+if [ -z "$UTIL" ]; then
+    abort "! Magisk util_functions.sh not found. Please install Magisk first."
+fi
+
+# Load Magisk utility functions
+. "$UTIL"
+
+# Verify required installer function exists
+if ! type install_module >/dev/null 2>&1; then
+    abort "! install_module() not found. Magisk version may be incompatible."
+fi
+
+# Optional environment check
+if type env_check >/dev/null 2>&1; then
+    env_check || abort "! Unsupported Magisk version detected."
+fi
+
+# Optional flashable setup
+if type setup_flashable >/dev/null 2>&1; then
+    setup_flashable
+fi
+
+mkdir -p "$TMPDIR"
+
+if ! type unzip >/dev/null 2>&1; then
+    abort "! unzip binary not found."
+fi
+
+ui_print "- Extracting module package"
+unzip -o -qq "$ZIPFILE" -d "$TMPDIR" >&$OUTFD || abort "! Failed to extract module package"
+
+if [ ! -f "$TMPDIR/module.prop" ]; then
+    abort "! module.prop not found inside ZIP"
+fi
+
+# Remove installer metadata before module installation
+rm -rf "$TMPDIR/META-INF" 2>/dev/null
+
+ui_print "- Installing module"
+install_module "$TMPDIR" || abort "! Failed to install module"
+
+ui_print "Done"
+exit 0

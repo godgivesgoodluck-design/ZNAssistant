@@ -1,0 +1,73 @@
+name: Build and Release ZN-Assistant
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*' # Trigger saat ada push tag versi (contoh: v1.0, v1.1)
+  pull_request:
+  workflow_dispatch: # Memungkinkan trigger manual dari tab Actions
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify and Extract Module Info
+        run: |
+          # Cek apakah module.prop ada
+          if [ ! -f "module.prop" ]; then
+            echo "::error::module.prop tidak ditemukan di root directory!"
+            exit 1
+          fi
+          
+          # Ekstrak info dari module.prop (tr -d '\r' untuk mencegah error CRLF Windows)
+          MODULE_ID=$(grep '^id=' module.prop | cut -d'=' -f2 | tr -d '\r')
+          MODULE_VERSION=$(grep '^version=' module.prop | cut -d'=' -f2 | tr -d '\r')
+          MODULE_VERSION_CODE=$(grep '^versionCode=' module.prop | cut -d'=' -f2 | tr -d '\r')
+          
+          echo "MODULE_ID=$MODULE_ID" >> $GITHUB_ENV
+          echo "MODULE_VERSION=$MODULE_VERSION" >> $GITHUB_ENV
+          echo "MODULE_VERSION_CODE=$MODULE_VERSION_CODE" >> $GITHUB_ENV
+          
+          # Format nama file ZIP
+          ZIP_NAME="${MODULE_ID}-${MODULE_VERSION}.zip"
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+          echo "✅ Berhasil membaca module.prop: $MODULE_ID v$MODULE_VERSION"
+
+      - name: Package Module to ZIP
+        run: |
+          # Kompres semua file menjadi ZIP, kecuali file/folder yang tidak perlu
+          zip -r ${{ env.ZIP_NAME }} . -x ".git/*" ".github/*" ".gitignore" "README.md" "LICENSE"
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ env.ZIP_NAME }}
+          retention-days: 7 # Artifact akan dihapus otomatis setelah 7 hari
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "ZN-Assistant ${{ env.MODULE_VERSION }}"
+          body: |
+            **ZN-Assistant** - Assistant untuk Zygisk Next v1.5.2
+            Kompatibel dengan Magisk Alpha 30700 / 31000
+            
+            **Fitur:**
+            - Memaksimalkan root hiding Zygisk Next
+            - Agresif menghapus trace/log Magisk & Zygisk
+            - Resetprop untuk menyembunyikan bootloader unlock
+            
+            *Instal via Magisk App -> Modules -> Install from storage*
+          files: ${{ env.ZIP_NAME }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

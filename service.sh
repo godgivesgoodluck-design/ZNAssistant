@@ -1,37 +1,90 @@
 #!/system/bin/sh
 # ZN-Assistant service.sh
+# Late boot property spoofing and trace cleanup
 
 MODDIR=${0%/*}
 
-# Tunggu hingga boot selesai
-until [ "$(getprop sys.boot_completed)" = "1" ]; do
+# ---------------------------------------------------------------
+# Tunggu boot completed dengan timeout agar tidak hang
+# ---------------------------------------------------------------
+WAIT_COUNT=0
+MAX_WAIT=180
+
+while [ "$(getprop sys.boot_completed)" != "1" ]; do
+    WAIT_COUNT=$((WAIT_COUNT + 1))
+
+    if [ "$WAIT_COUNT" -ge "$MAX_WAIT" ]; then
+        break
+    fi
+
     sleep 1
 done
 
-# Beri jeda tambahan untuk memastikan Zygisk Next selesai inject
+# Jeda tambahan agar Zygisk Next selesai inject
 sleep 5
 
-# 1. Reset Properti untuk menyembunyikan Bootloader Unlock & Root
-resetprop sys.bootloader.locked 1
-resetprop ro.boot.verified_bootstate green
-resetprop ro.boot.veritymode enforcing
-resetprop ro.boot.vbmeta.device_state locked
-resetprop ro.debuggable 0
-resetprop ro.secure 1
-resetprop ro.build.tags release-keys
-resetprop ro.build.type user
-resetprop ro.build.flavor $(getprop ro.build.flavor | sed 's/-userdebug/-user/g' | sed 's/-eng/-user/g')
+# ---------------------------------------------------------------
+# Fungsi resetprop aman
+# ---------------------------------------------------------------
+safe_resetprop() {
+    if command -v resetprop >/dev/null 2>&1; then
+        resetprop "$1" "$2" 2>/dev/null || true
+    fi
+}
 
-# 2. Sembunyikan trace Zygisk Next di properti
-resetprop ro.zygisk.next 0
-resetprop persist.zygisk.next 0
+# ---------------------------------------------------------------
+# Sembunyikan tanda bootloader unlock / root
+# ---------------------------------------------------------------
+safe_resetprop ro.debuggable 0
+safe_resetprop ro.secure 1
+safe_resetprop ro.build.type user
+safe_resetprop ro.build.tags release-keys
 
-# 3. Pembersihan Log Tahap Akhir (Aggressive Trace Removal)
-# Magisk Alpha sering membuat log baru saat service berjalan
-rm -f /data/cache/magisk.log
-rm -f /data/cache/magisk.log.bak
-rm -f /data/cache/zygisk_next.log
-rm -rf /data/local/tmp/*
+safe_resetprop ro.boot.verifiedbootstate green
+safe_resetprop ro.boot.vbmeta.device_state locked
+safe_resetprop ro.boot.veritymode enforcing
+safe_resetprop ro.boot.flash.locked 1
+safe_resetprop sys.bootloader.locked 1
 
-# Kosongkan logcat yang mungkin mengandung kata kunci 'magisk', 'zygisk', 'su'
-logcat -c 2>/dev/null
+# ---------------------------------------------------------------
+# Samarkan jejak properti Zygisk Next
+# ---------------------------------------------------------------
+safe_resetprop ro.zygisk.next 0
+safe_resetprop persist.zygisk.next 0
+safe_resetprop ro.zygisk 0
+safe_resetprop persist.zygisk 0
+
+# ---------------------------------------------------------------
+# Bersihkan log pasca-boot
+# ---------------------------------------------------------------
+rm -f /data/cache/magisk.log 2>/dev/null
+rm -f /data/cache/magisk.log.bak 2>/dev/null
+rm -f /data/cache/zygisk_next.log 2>/dev/null
+rm -f /data/cache/zygisk-next.log 2>/dev/null
+rm -f /data/cache/zygisk.log 2>/dev/null
+
+# ---------------------------------------------------------------
+# Bersihkan file mencurigakan di tmp
+# ---------------------------------------------------------------
+for FILE in /data/local/tmp/*; do
+    [ -e "$FILE" ] || continue
+
+    case "$FILE" in
+        *magisk*|*Magisk*|*MAGISK*)
+            rm -rf "$FILE" 2>/dev/null
+            ;;
+        *zygisk*|*Zygisk*|*ZYGISK*)
+            rm -rf "$FILE" 2>/dev/null
+            ;;
+        */su|*/supolicy|*/busybox|*/resetprop)
+            rm -rf "$FILE" 2>/dev/null
+            ;;
+    esac
+done
+
+# ---------------------------------------------------------------
+# Kosongkan logcat agar tidak ada jejak text log
+# ---------------------------------------------------------------
+logcat -c 2>/dev/null || true
+
+exit 0

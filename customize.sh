@@ -12,8 +12,8 @@ ui_print "############################################"
 ui_print " "
 
 # ---------------------------------------------------------------
-# Deteksi Zygisk Next secara fleksibel
-# Tidak lagi langsung abort jika tidak ketemu, hanya warning.
+# Deteksi Zygisk Next secara fleksibel.
+# Tidak abort jika tidak terdeteksi, hanya warning.
 # ---------------------------------------------------------------
 ZYGISK_FOUND=0
 ZYGISK_ID=""
@@ -47,7 +47,7 @@ fi
 ui_print " "
 
 # ---------------------------------------------------------------
-# Deteksi versi Magisk Alpha
+# Deteksi versi Magisk Alpha.
 # Hanya informasi, tidak memblokir install.
 # ---------------------------------------------------------------
 MAGISK_VER_CODE=$(magisk -V 2>/dev/null)

@@ -47,6 +47,14 @@ safe_resetprop ro.boot.flash.locked 1
 safe_resetprop sys.bootloader.locked 1
 
 # ---------------------------------------------------------------
+# Samarkan jejak properti Zygisk Next
+# ---------------------------------------------------------------
+safe_resetprop ro.zygisk.next 0
+safe_resetprop persist.zygisk.next 0
+safe_resetprop ro.zygisk 0
+safe_resetprop persist.zygisk 0
+
+# ---------------------------------------------------------------
 # Bersihkan log pasca-boot
 # ---------------------------------------------------------------
 rm -f /data/cache/magisk.log 2>/dev/null

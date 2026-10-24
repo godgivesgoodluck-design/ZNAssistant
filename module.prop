@@ -1,6 +1,6 @@
-id=zn_assistant
-name=ZN-Assistant (Zygisk Next Optimizer)
-version=v1.0
-versionCode=1
-author=Qwenn
-description=Maximize Zygisk Next v1.5.2 root hiding, remove all traces/logs, optimized for Magisk Alpha 30700/31000.
+id=zn-assistant
+name=ZN-Assistant for Zygisk Next
+version=v1.1
+versionCode=2
+author=YourName
+description=Companion module for Zygisk Next v1.5.2. Optimizes root hiding, removes Magisk/Zygisk traces, compatible with Magisk Alpha 30700 and 31000.

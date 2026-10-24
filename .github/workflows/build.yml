@@ -1,4 +1,4 @@
-name: Build and Release ZN-Assistant
+name: Build ZN-Assistant
 
 on:
   push:
@@ -6,67 +6,124 @@ on:
       - main
       - master
     tags:
-      - 'v*' # Trigger saat ada push tag versi (contoh: v1.0, v1.1)
+      - 'v*'
   pull_request:
-  workflow_dispatch: # Memungkinkan trigger manual dari tab Actions
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Verify and Extract Module Info
+      - name: Install dependencies
         run: |
-          # Cek apakah module.prop ada
-          if [ ! -f "module.prop" ]; then
-            echo "::error::module.prop tidak ditemukan di root directory!"
+          sudo apt-get update
+          sudo apt-get install -y zip curl
+
+      - name: Fix line endings
+        run: |
+          find . -type f \( -name "*.sh" -o -name "module.prop" -o -name "system.prop" -o -path "./META-INF/*" \) -exec sed -i 's/\r$//' {} +
+
+      - name: Prepare Magisk META-INF
+        run: |
+          mkdir -p META-INF/com/google/android
+
+          # Download update-binary resmi dari template Magisk
+          curl -fsSL -o META-INF/com/google/android/update-binary \
+            https://raw.githubusercontent.com/topjohnwu/magisk-module-template/master/META-INF/com/google/android/update-binary
+
+          printf '#MAGISK\n' > META-INF/com/google/android/updater-script
+
+          chmod +x META-INF/com/google/android/update-binary
+
+      - name: Set executable permissions
+        run: |
+          chmod +x customize.sh 2>/dev/null || true
+          chmod +x post-fs-data.sh 2>/dev/null || true
+          chmod +x service.sh 2>/dev/null || true
+          chmod +x META-INF/com/google/android/update-binary 2>/dev/null || true
+
+      - name: Read module.prop
+        id: info
+        run: |
+          if [ ! -f module.prop ]; then
+            echo "::error::module.prop not found!"
             exit 1
           fi
-          
-          # Ekstrak info dari module.prop (tr -d '\r' untuk mencegah error CRLF Windows)
+
           MODULE_ID=$(grep '^id=' module.prop | cut -d'=' -f2 | tr -d '\r')
+          MODULE_NAME=$(grep '^name=' module.prop | cut -d'=' -f2 | tr -d '\r')
           MODULE_VERSION=$(grep '^version=' module.prop | cut -d'=' -f2 | tr -d '\r')
           MODULE_VERSION_CODE=$(grep '^versionCode=' module.prop | cut -d'=' -f2 | tr -d '\r')
-          
+
+          if [ -z "$MODULE_ID" ] || [ -z "$MODULE_VERSION" ] || [ -z "$MODULE_VERSION_CODE" ]; then
+            echo "::error::module.prop incomplete!"
+            exit 1
+          fi
+
+          ZIP_NAME="${MODULE_ID}-${MODULE_VERSION}.zip"
+
           echo "MODULE_ID=$MODULE_ID" >> $GITHUB_ENV
+          echo "MODULE_NAME=$MODULE_NAME" >> $GITHUB_ENV
           echo "MODULE_VERSION=$MODULE_VERSION" >> $GITHUB_ENV
           echo "MODULE_VERSION_CODE=$MODULE_VERSION_CODE" >> $GITHUB_ENV
-          
-          # Format nama file ZIP
-          ZIP_NAME="${MODULE_ID}-${MODULE_VERSION}.zip"
           echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
-          echo "✅ Berhasil membaca module.prop: $MODULE_ID v$MODULE_VERSION"
 
-      - name: Package Module to ZIP
+          echo "Building $MODULE_NAME $MODULE_VERSION"
+
+      - name: Package module
         run: |
-          # Kompres semua file menjadi ZIP, kecuali file/folder yang tidak perlu
-          zip -r ${{ env.ZIP_NAME }} . -x ".git/*" ".github/*" ".gitignore" "README.md" "LICENSE"
+          rm -f "${ZIP_NAME}"
 
-      - name: Upload Build Artifact
+          zip -r "${ZIP_NAME}" . \
+            -x ".git/*" \
+            -x ".github/*" \
+            -x "README.md" \
+            -x "LICENSE" \
+            -x ".gitattributes"
+
+          echo "Artifact: ${ZIP_NAME}"
+          unzip -l "${ZIP_NAME}"
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
           path: ${{ env.ZIP_NAME }}
-          retention-days: 7 # Artifact akan dihapus otomatis setelah 7 hari
+          retention-days: 30
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          name: "ZN-Assistant ${{ env.MODULE_VERSION }}"
+          tag_name: ${{ github.ref_name }}
+          name: "${{ env.MODULE_NAME }} ${{ env.MODULE_VERSION }}"
           body: |
-            **ZN-Assistant** - Assistant untuk Zygisk Next v1.5.2
-            Kompatibel dengan Magisk Alpha 30700 / 31000
-            
-            **Fitur:**
-            - Memaksimalkan root hiding Zygisk Next
-            - Agresif menghapus trace/log Magisk & Zygisk
-            - Resetprop untuk menyembunyikan bootloader unlock
-            
-            *Instal via Magisk App -> Modules -> Install from storage*
+            ## ${{ env.MODULE_NAME }} ${{ env.MODULE_VERSION }}
+
+            Companion module untuk Zygisk Next v1.5.2.
+
+            ### Fitur
+            - Optimize Zygisk Next root hiding
+            - Remove Magisk/Zygisk trace logs
+            - Clean suspicious files in /data/local/tmp
+            - Spoof bootloader/root related properties
+            - Compatible with Magisk Alpha 30700 / 31000+
+
+            ### Install
+            1. Install Zygisk Next v1.5.2+
+            2. Disable built-in Magisk Zygisk
+            3. Install this module from Magisk app
+            4. Reboot
+
+            ### Note
+            Gunakan dengan risiko sendiri. Backup sebelum install.
           files: ${{ env.ZIP_NAME }}
           generate_release_notes: true
         env:

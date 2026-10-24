@@ -21,91 +21,176 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Normalize line endings
+      - name: Sanitize text files
         run: |
-          find . -type f \( -name "*.sh" -o -name "module.prop" -o -name "system.prop" -o -path "./META-INF/*" \) -print0 | xargs -0 -r sed -i 's/\r$//'
+          set -euo pipefail
 
-      - name: Set executable permissions
+          # Remove BOM and CRLF from important text files.
+          find . -type f \( \
+            -name "*.sh" \
+            -o -name "*.prop" \
+            -o -name "*.md" \
+            -o -name ".gitattributes" \
+            -o -name ".gitignore" \
+            -o -path "./META-INF/*" \
+          \) -print0 | xargs -0 -r sed -i '1s/^\xEF\xBB\xBF//; s/\r$//'
+
+      - name: Ensure required files exist
         run: |
-          for f in customize.sh post-fs-data.sh service.sh; do
-            if [ -f "$f" ]; then
-              chmod +x "$f"
+          set -euo pipefail
+
+          REQUIRED_FILES="
+          module.prop
+          customize.sh
+          post-fs-data.sh
+          service.sh
+          system.prop
+          META-INF/com/google/android/update-binary
+          META-INF/com/google/android/updater-script
+          "
+
+          for FILE in $REQUIRED_FILES; do
+            if [ ! -f "$FILE" ]; then
+              echo "::error::Required file missing: $FILE"
+              exit 1
             fi
           done
 
-          if [ -f META-INF/com/google/android/update-binary ]; then
-            chmod +x META-INF/com/google/android/update-binary
-          fi
+      - name: Set executable permissions
+        run: |
+          set -euo pipefail
 
-      - name: Validate module.prop
+          chmod +x customize.sh
+          chmod +x post-fs-data.sh
+          chmod +x service.sh
+          chmod +x META-INF/com/google/android/update-binary
+
+      - name: Read and validate module.prop
         id: info
         run: |
-          set -e
+          set -euo pipefail
 
-          if [ ! -f module.prop ]; then
-            echo "::error::module.prop tidak ditemukan di root repository!"
+          MODULE_ID=$(sed -n 's/^id=//p' module.prop | head -n1)
+          MODULE_NAME=$(sed -n 's/^name=//p' module.prop | head -n1)
+          MODULE_VERSION=$(sed -n 's/^version=//p' module.prop | head -n1)
+          MODULE_VERSION_CODE=$(sed -n 's/^versionCode=//p' module.prop | head -n1)
+
+          if [ -z "$MODULE_ID" ]; then
+            echo "::error::Field id= is empty in module.prop"
             exit 1
           fi
 
-          MODULE_ID=$(awk -F= '/^id=/{gsub(/\r/, "", $2); print $2; exit}' module.prop)
-          MODULE_NAME=$(awk -F= '/^name=/{gsub(/\r/, "", $2); print $2; exit}' module.prop)
-          MODULE_VERSION=$(awk -F= '/^version=/{gsub(/\r/, "", $2); print $2; exit}' module.prop)
-          MODULE_VERSION_CODE=$(awk -F= '/^versionCode=/{gsub(/\r/, "", $2); print $2; exit}' module.prop)
-
-          if [ -z "$MODULE_ID" ]; then
-            echo "::error::Field id= kosong di module.prop!"
+          if [ -z "$MODULE_NAME" ]; then
+            echo "::error::Field name= is empty in module.prop"
             exit 1
           fi
 
           if [ -z "$MODULE_VERSION" ]; then
-            echo "::error::Field version= kosong di module.prop!"
+            echo "::error::Field version= is empty in module.prop"
             exit 1
           fi
 
           if [ -z "$MODULE_VERSION_CODE" ]; then
-            echo "::error::Field versionCode= kosong di module.prop!"
+            echo "::error::Field versionCode= is empty in module.prop"
             exit 1
           fi
 
           case "$MODULE_VERSION_CODE" in
             ''|*[!0-9]*)
-              echo "::error::versionCode harus berupa angka!"
+              echo "::error::versionCode must be numeric"
               exit 1
               ;;
           esac
 
           ZIP_NAME="${MODULE_ID}-${MODULE_VERSION}.zip"
 
-          echo "MODULE_ID=$MODULE_ID" >> $GITHUB_ENV
-          echo "MODULE_NAME=$MODULE_NAME" >> $GITHUB_ENV
-          echo "MODULE_VERSION=$MODULE_VERSION" >> $GITHUB_ENV
-          echo "MODULE_VERSION_CODE=$MODULE_VERSION_CODE" >> $GITHUB_ENV
-          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+          echo "MODULE_ID=$MODULE_ID" >> "$GITHUB_ENV"
+          echo "MODULE_NAME=$MODULE_NAME" >> "$GITHUB_ENV"
+          echo "MODULE_VERSION=$MODULE_VERSION" >> "$GITHUB_ENV"
+          echo "MODULE_VERSION_CODE=$MODULE_VERSION_CODE" >> "$GITHUB_ENV"
+          echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
 
           echo "Building: $MODULE_NAME $MODULE_VERSION"
           echo "Artifact: $ZIP_NAME"
 
+      - name: Stage module files
+        run: |
+          set -euo pipefail
+
+          rm -rf staging
+          mkdir -p staging
+
+          cp -a module.prop staging/
+          cp -a customize.sh staging/
+          cp -a post-fs-data.sh staging/
+          cp -a service.sh staging/
+          cp -a system.prop staging/
+          cp -a META-INF staging/
+
+          # Optional files, copied only if present
+          for ITEM in sepolicy.rule boot-completed.sh action.sh webui update.json; do
+            if [ -e "$ITEM" ]; then
+              cp -a "$ITEM" staging/
+            fi
+          done
+
+          chmod +x staging/customize.sh
+          chmod +x staging/post-fs-data.sh
+          chmod +x staging/service.sh
+          chmod +x staging/META-INF/com/google/android/update-binary
+
       - name: Package module ZIP
         run: |
-          set -e
+          set -euo pipefail
 
-          rm -f "${ZIP_NAME}"
+          rm -f "$ZIP_NAME"
 
-          zip -r "${ZIP_NAME}" . \
-            -x ".git/*" \
-            -x ".github/*" \
-            -x "README.md" \
-            -x "LICENSE" \
-            -x ".gitattributes"
+          cd staging
+
+          FILES=(
+            module.prop
+            customize.sh
+            post-fs-data.sh
+            service.sh
+            system.prop
+            META-INF
+          )
+
+          for ITEM in sepolicy.rule boot-completed.sh action.sh webui update.json; do
+            if [ -e "$ITEM" ]; then
+              FILES+=("$ITEM")
+            fi
+          done
+
+          zip -r "../$ZIP_NAME" "${FILES[@]}"
+
+          cd ..
 
           echo ""
-          echo "Isi ZIP:"
-          unzip -l "${ZIP_NAME}"
+          echo "ZIP contents:"
+          unzip -l "$ZIP_NAME"
 
-          if ! unzip -l "${ZIP_NAME}" | grep -q "module.prop"; then
-            echo "::error::module.prop tidak ditemukan di dalam ZIP!"
+          # Reject ZIP if it contains ./module.prop
+          if unzip -l "$ZIP_NAME" | grep -q '\./module\.prop'; then
+            echo "::error::ZIP contains ./module.prop. Invalid ZIP structure."
             exit 1
           fi
+
+          # Verify required files are inside ZIP
+          for REQUIRED in \
+            module.prop \
+            customize.sh \
+            post-fs-data.sh \
+            service.sh \
+            system.prop \
+            META-INF/com/google/android/update-binary \
+            META-INF/com/google/android/updater-script
+          do
+            if ! unzip -l "$ZIP_NAME" | grep -q "$REQUIRED"; then
+              echo "::error::Required file missing inside ZIP: $REQUIRED"
+              exit 1
+            fi
+          done
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

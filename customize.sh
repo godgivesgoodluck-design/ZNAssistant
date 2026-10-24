@@ -1,11 +1,20 @@
 #!/system/bin/sh
 # ZN-Assistant customize.sh
-# Safe installer check for Magisk Alpha 30700/31000 + Zygisk Next v1.5.2
+#
+# PENTING:
+# File ini di-source oleh installer Magisk.
+# JANGAN pakai exit di file ini.
+# Jika memakai exit 0, instalasi bisa berhenti sebelum module terinstall.
+
+SKIPMOUNT=false
+PROPFILE=true
+POSTFSDATA=true
+LATESTARTSERVICE=true
 
 ui_print " "
 ui_print "############################################"
 ui_print "#                                          #"
-ui_print "#             ZN-Assistant v1.1            #"
+ui_print "#             ZN-Assistant v1.3            #"
 ui_print "#      Zygisk Next Optimizer / Cleaner     #"
 ui_print "#                                          #"
 ui_print "############################################"
@@ -73,4 +82,4 @@ ui_print "[+] Installing ZN-Assistant..."
 ui_print "[+] Module will optimize Zygisk Next hiding and clean traces."
 ui_print " "
 
-exit 0
+# JANGAN TAMBAHKAN exit DI SINI.

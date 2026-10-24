@@ -21,51 +21,58 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Normalize line endings
         run: |
-          sudo apt-get update
-          sudo apt-get install -y zip curl
-
-      - name: Fix line endings
-        run: |
-          find . -type f \( -name "*.sh" -o -name "module.prop" -o -name "system.prop" -o -path "./META-INF/*" \) -exec sed -i 's/\r$//' {} +
-
-      - name: Prepare Magisk META-INF
-        run: |
-          mkdir -p META-INF/com/google/android
-
-          # Download update-binary resmi dari template Magisk
-          curl -fsSL -o META-INF/com/google/android/update-binary \
-            https://raw.githubusercontent.com/topjohnwu/magisk-module-template/master/META-INF/com/google/android/update-binary
-
-          printf '#MAGISK\n' > META-INF/com/google/android/updater-script
-
-          chmod +x META-INF/com/google/android/update-binary
+          find . -type f \( -name "*.sh" -o -name "module.prop" -o -name "system.prop" -o -path "./META-INF/*" \) -print0 | xargs -0 -r sed -i 's/\r$//'
 
       - name: Set executable permissions
         run: |
-          chmod +x customize.sh 2>/dev/null || true
-          chmod +x post-fs-data.sh 2>/dev/null || true
-          chmod +x service.sh 2>/dev/null || true
-          chmod +x META-INF/com/google/android/update-binary 2>/dev/null || true
+          for f in customize.sh post-fs-data.sh service.sh; do
+            if [ -f "$f" ]; then
+              chmod +x "$f"
+            fi
+          done
 
-      - name: Read module.prop
+          if [ -f META-INF/com/google/android/update-binary ]; then
+            chmod +x META-INF/com/google/android/update-binary
+          fi
+
+      - name: Validate module.prop
         id: info
         run: |
+          set -e
+
           if [ ! -f module.prop ]; then
-            echo "::error::module.prop not found!"
+            echo "::error::module.prop tidak ditemukan di root repository!"
             exit 1
           fi
 
-          MODULE_ID=$(grep '^id=' module.prop | cut -d'=' -f2 | tr -d '\r')
-          MODULE_NAME=$(grep '^name=' module.prop | cut -d'=' -f2 | tr -d '\r')
-          MODULE_VERSION=$(grep '^version=' module.prop | cut -d'=' -f2 | tr -d '\r')
-          MODULE_VERSION_CODE=$(grep '^versionCode=' module.prop | cut -d'=' -f2 | tr -d '\r')
+          MODULE_ID=$(awk -F= '/^id=/{gsub(/\r/, "", $2); print $2; exit}' module.prop)
+          MODULE_NAME=$(awk -F= '/^name=/{gsub(/\r/, "", $2); print $2; exit}' module.prop)
+          MODULE_VERSION=$(awk -F= '/^version=/{gsub(/\r/, "", $2); print $2; exit}' module.prop)
+          MODULE_VERSION_CODE=$(awk -F= '/^versionCode=/{gsub(/\r/, "", $2); print $2; exit}' module.prop)
 
-          if [ -z "$MODULE_ID" ] || [ -z "$MODULE_VERSION" ] || [ -z "$MODULE_VERSION_CODE" ]; then
-            echo "::error::module.prop incomplete!"
+          if [ -z "$MODULE_ID" ]; then
+            echo "::error::Field id= kosong di module.prop!"
             exit 1
           fi
+
+          if [ -z "$MODULE_VERSION" ]; then
+            echo "::error::Field version= kosong di module.prop!"
+            exit 1
+          fi
+
+          if [ -z "$MODULE_VERSION_CODE" ]; then
+            echo "::error::Field versionCode= kosong di module.prop!"
+            exit 1
+          fi
+
+          case "$MODULE_VERSION_CODE" in
+            ''|*[!0-9]*)
+              echo "::error::versionCode harus berupa angka!"
+              exit 1
+              ;;
+          esac
 
           ZIP_NAME="${MODULE_ID}-${MODULE_VERSION}.zip"
 
@@ -75,10 +82,13 @@ jobs:
           echo "MODULE_VERSION_CODE=$MODULE_VERSION_CODE" >> $GITHUB_ENV
           echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
 
-          echo "Building $MODULE_NAME $MODULE_VERSION"
+          echo "Building: $MODULE_NAME $MODULE_VERSION"
+          echo "Artifact: $ZIP_NAME"
 
-      - name: Package module
+      - name: Package module ZIP
         run: |
+          set -e
+
           rm -f "${ZIP_NAME}"
 
           zip -r "${ZIP_NAME}" . \
@@ -88,10 +98,16 @@ jobs:
             -x "LICENSE" \
             -x ".gitattributes"
 
-          echo "Artifact: ${ZIP_NAME}"
+          echo ""
+          echo "Isi ZIP:"
           unzip -l "${ZIP_NAME}"
 
-      - name: Upload artifact
+          if ! unzip -l "${ZIP_NAME}" | grep -q "module.prop"; then
+            echo "::error::module.prop tidak ditemukan di dalam ZIP!"
+            exit 1
+          fi
+
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
@@ -112,14 +128,14 @@ jobs:
             ### Fitur
             - Optimize Zygisk Next root hiding
             - Remove Magisk/Zygisk trace logs
-            - Clean suspicious files in /data/local/tmp
+            - Clean suspicious files in `/data/local/tmp`
             - Spoof bootloader/root related properties
             - Compatible with Magisk Alpha 30700 / 31000+
 
             ### Install
             1. Install Zygisk Next v1.5.2+
             2. Disable built-in Magisk Zygisk
-            3. Install this module from Magisk app
+            3. Install module ini dari Magisk app
             4. Reboot
 
             ### Note
